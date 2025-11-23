@@ -1,0 +1,9 @@
+streamlit
+lxml
+geopandas
+shapely
+pyproj
+pydeck
+pandas
+numpy
+rtree  
