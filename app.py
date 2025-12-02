@@ -1,26 +1,39 @@
+import json
+import tempfile
+
 import geopandas as gpd
 import pydeck as pdk
 import streamlit as st
 
-st.set_page_config(page_title="PLATEAU Viewer", layout="wide")
-st.title("PLATEAU Viewer (Streamlit + PyDeck)")
+st.set_page_config(page_title="PLATEAU Simulator", layout="wide")
+st.title("PLATEAU Simulation Viewer")
 
-# -----------------------
-# GeoJSON の読み込み
-# -----------------------
-geojson_path = "data/shibuya_buildings.geojson"
 
-st.sidebar.write("PLATEAU データ読み込み中…")
-gdf = gpd.read_file(geojson_path)
-gdf = gdf.to_crs(epsg=4326)
+# ===========================
+# 1) Load File
+# ===========================
 
-# 中心位置を計算
-center_lon = gdf.geometry.centroid.x.mean()
-center_lat = gdf.geometry.centroid.y.mean()
+uploaded_file = st.file_uploader(
+    "PLATEAU GeoJSON を選択してください (.geojson / .json)", type=["geojson", "json"]
+)
 
-# -----------------------
-# 高さ属性を推定（あれば使用）
-# -----------------------
+if uploaded_file is None:
+    st.info("左のボックスから PLATEAU GeoJSON ファイルを選択してください")
+    st.stop()
+
+# Save uploaded file
+with tempfile.NamedTemporaryFile(delete=False, suffix=".geojson") as tmp:
+    tmp.write(uploaded_file.read())
+    tmp_path = tmp.name
+
+# Read GeoJSON
+gdf = gpd.read_file(tmp_path).to_crs(epsg=4326)
+
+
+# ===========================
+# 2) Determine height column
+# ===========================
+
 height_key = None
 for col in gdf.columns:
     if "height" in col.lower():
@@ -28,109 +41,103 @@ for col in gdf.columns:
         break
 
 if height_key:
-    gdf["height"] = gdf[height_key].fillna(15)
+    gdf["height"] = gdf[height_key].fillna(10)
 else:
-    gdf["height"] = 15  # デフォルト高さ
+    gdf["height"] = 10  # default
 
-# -----------------------
-# 3D描画オン/オフ
-# -----------------------
-extrude = st.sidebar.checkbox("3D表示（押し出し）", value=False)
+
+# ===========================
+# 3) Simulation parameters
+# ===========================
+
+st.sidebar.header("Simulation Settings")
+
+water_level = st.sidebar.slider(
+    "水位 (m)",
+    min_value=0.0,
+    max_value=float(gdf["height"].max() + 10),
+    value=2.0,
+    step=0.5,
+)
+
+extrude = st.sidebar.checkbox("3D表示（押し出し）", value=True)
+
+
+# ===========================
+# 4) Simulation Logic
+# ===========================
+
+# flooded = 水位が建物高さの 50% 以上
+gdf["flooded"] = gdf["height"].apply(lambda h: water_level >= 0.5 * h)
+
+
+def get_color(flooded):
+    return [200, 50, 50, 200] if flooded else [100, 160, 200, 150]
+
+
+gdf["color"] = gdf["flooded"].apply(get_color)
+
+
+# ===========================
+# 5) Map Center
+# ===========================
+
+center = gdf.geometry.centroid
+lon = center.x.mean()
+lat = center.y.mean()
+
+
+# ===========================
+# 6) Pydeck Layer
+# ===========================
 
 layer = pdk.Layer(
     "GeoJsonLayer",
-    data=gdf.__geo_interface__,
+    gdf.__geo_interface__,
     stroked=True,
     filled=True,
     extruded=extrude,
     get_elevation="properties.height",
-    get_fill_color="[100, 160, 200]",
-    get_line_color="[50, 50, 80]",
+    get_fill_color="properties.color",
+    get_line_color=[50, 50, 80],
     line_width_min_pixels=1,
+    pickable=True,
 )
 
-view_state = pdk.ViewState(
-    latitude=center_lat,
-    longitude=center_lon,
+
+view = pdk.ViewState(
+    latitude=lat,
+    longitude=lon,
     zoom=14,
     pitch=45 if extrude else 0,
 )
 
-# -----------------------
-# 表示
-# -----------------------
-st.pydeck_chart(
-    pdk.Deck(
-        layers=[layer],
-        initial_view_state=view_state,
-        map_style="mapbox://styles/mapbox/light-v9",
-    )
+
+deck = pdk.Deck(
+    layers=[layer],
+    initial_view_state=view,
+    tooltip={"text": "height: {height} m\nflooded: {flooded}"},
+    map_style="mapbox://styles/mapbox/light-v9",
 )
 
-import geopandas as gpd
-import pydeck as pdk
 
-st.set_page_config(page_title="PLATEAU Viewer", layout="wide")
-st.title("PLATEAU Viewer (Streamlit + PyDeck)")
+# ===========================
+# 7) Render
+# ===========================
 
-# -----------------------
-# GeoJSON の読み込み
-# -----------------------
-geojson_path = "data/shibuya_buildings.geojson"
+st.subheader("Simulation Result")
+st.pydeck_chart(deck)
 
-st.sidebar.write("PLATEAU データ読み込み中…")
-gdf = gpd.read_file(geojson_path)
-gdf = gdf.to_crs(epsg=4326)
 
-# 中心位置を計算
-center_lon = gdf.geometry.centroid.x.mean()
-center_lat = gdf.geometry.centroid.y.mean()
+# ===========================
+# 8) Summary
+# ===========================
 
-# -----------------------
-# 高さ属性を推定（あれば使用）
-# -----------------------
-height_key = None
-for col in gdf.columns:
-    if "height" in col.lower():
-        height_key = col
-        break
+total = len(gdf)
+flooded = gdf["flooded"].sum()
 
-if height_key:
-    gdf["height"] = gdf[height_key].fillna(15)
-else:
-    gdf["height"] = 15  # デフォルト高さ
-
-# -----------------------
-# 3D描画オン/オフ
-# -----------------------
-extrude = st.sidebar.checkbox("3D表示（押し出し）", value=False)
-
-layer = pdk.Layer(
-    "GeoJsonLayer",
-    data=gdf.__geo_interface__,
-    stroked=True,
-    filled=True,
-    extruded=extrude,
-    get_elevation="properties.height",
-    get_fill_color="[100, 160, 200]",
-    get_line_color="[50, 50, 80]",
-    line_width_min_pixels=1,
-)
-
-view_state = pdk.ViewState(
-    latitude=center_lat,
-    longitude=center_lon,
-    zoom=14,
-    pitch=45 if extrude else 0,
-)
-
-# -----------------------
-# 表示
-# -----------------------
-st.pydeck_chart(
-    pdk.Deck(
-        layers=[layer],
-        initial_view_state=view_state,
-        map_style="mapbox://styles/mapbox/light-v9",
-    )
-)
+with st.expander("統計情報"):
+    st.write(f"総建物数: {total}")
+    st.write(f"浸水建物数: {flooded}")
+    st.write(f"浸水率: {flooded / total * 100:.1f}%")
+    st.dataframe(gdf.head())
