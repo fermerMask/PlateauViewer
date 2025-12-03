@@ -140,7 +140,8 @@ deck = pdk.Deck(
     initial_view_state=view,
     views=[pdk.View(type="OrbitView", controller=True)],
     tooltip={"text": "{risk}"},
-    map_style="mapbox://styles/mapbox/light-v11",
+    map_style="https://basemaps.cartocdn.com/gl/positron-gl-style/style.json"
+,
 )
 
 
