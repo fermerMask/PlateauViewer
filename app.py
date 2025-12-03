@@ -140,7 +140,7 @@ deck = pdk.Deck(
     initial_view_state=view,
     views=[pdk.View(type="OrbitView", controller=True)],
     tooltip={"text": "{risk}"},
-    map_style="mapbox://styles/mapbox/light-v10",
+    map_style="mapbox://styles/mapbox/light-v11",
 )
 
 
